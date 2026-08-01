@@ -178,7 +178,7 @@ class WebSocketHandler:
     async def _init_service_context(
         self, send_text: Callable, client_uid: str
     ) -> ServiceContext:
-        """Initialize service context for a new session by cloning the default context"""
+        """Initialize an isolated service context for a new client session."""
         session_service_context = ServiceContext()
         await session_service_context.load_cache(
             config=self.default_context_cache.config.model_copy(deep=True),
@@ -192,12 +192,19 @@ class WebSocketHandler:
             asr_engine=self.default_context_cache.asr_engine,
             tts_engine=self.default_context_cache.tts_engine,
             vad_engine=self.default_context_cache.vad_engine,
-            agent_engine=self.default_context_cache.agent_engine,
+            agent_engine=None,
             translate_engine=self.default_context_cache.translate_engine,
             mcp_server_registery=self.default_context_cache.mcp_server_registery,
             tool_adapter=self.default_context_cache.tool_adapter,
             send_text=send_text,
             client_uid=client_uid,
+        )
+
+        # Agent instances contain mutable conversation memory, interrupt state, and
+        # session-specific tool bindings. They must never be shared between clients.
+        await session_service_context.init_agent(
+            session_service_context.character_config.agent_config,
+            session_service_context.character_config.persona_prompt,
         )
         return session_service_context
 
@@ -278,55 +285,66 @@ class WebSocketHandler:
         )
 
     async def handle_disconnect(self, client_uid: str) -> None:
-        """Handle client disconnection"""
-        group = self.chat_group_manager.get_client_group(client_uid)
-        if group:
-            await handle_group_interrupt(
-                group_id=group.group_id,
-                heard_response="",
-                current_conversation_tasks=self.current_conversation_tasks,
+        """Handle client disconnection and release all session-owned resources."""
+        context = self.client_contexts.get(client_uid)
+
+        try:
+            group = self.chat_group_manager.get_client_group(client_uid)
+            if group:
+                await handle_group_interrupt(
+                    group_id=group.group_id,
+                    heard_response="",
+                    current_conversation_tasks=self.current_conversation_tasks,
+                    chat_group_manager=self.chat_group_manager,
+                    client_contexts=self.client_contexts,
+                    broadcast_to_group=self.broadcast_to_group,
+                )
+
+            await handle_client_disconnect(
+                client_uid=client_uid,
                 chat_group_manager=self.chat_group_manager,
-                client_contexts=self.client_contexts,
-                broadcast_to_group=self.broadcast_to_group,
+                client_connections=self.client_connections,
+                send_group_update=self.send_group_update,
             )
+        finally:
+            self.client_connections.pop(client_uid, None)
+            self.client_contexts.pop(client_uid, None)
+            self.received_data_buffers.pop(client_uid, None)
 
-        await handle_client_disconnect(
-            client_uid=client_uid,
-            chat_group_manager=self.chat_group_manager,
-            client_connections=self.client_connections,
-            send_group_update=self.send_group_update,
-        )
-
-        # Clean up other client data
-        self.client_connections.pop(client_uid, None)
-        self.client_contexts.pop(client_uid, None)
-        self.received_data_buffers.pop(client_uid, None)
-        if client_uid in self.current_conversation_tasks:
-            task = self.current_conversation_tasks[client_uid]
+            task = self.current_conversation_tasks.pop(client_uid, None)
             if task and not task.done():
                 task.cancel()
-            self.current_conversation_tasks.pop(client_uid, None)
 
-        # Call context close to clean up resources (e.g., MCPClient)
-        context = self.client_contexts.get(client_uid)
-        if context:
-            await context.close()
+            if context:
+                try:
+                    await context.close()
+                except Exception as e:
+                    logger.error(
+                        f"Failed to close service context for client {client_uid}: {e}"
+                    )
+
+            message_handler.cleanup_client(client_uid)
 
         logger.info(f"Client {client_uid} disconnected")
-        message_handler.cleanup_client(client_uid)
 
     async def _cleanup_failed_connection(self, client_uid: str) -> None:
-        """Clean up failed connection data"""
+        """Clean up resources allocated before connection initialization failed."""
+        context = self.client_contexts.pop(client_uid, None)
         self.client_connections.pop(client_uid, None)
-        self.client_contexts.pop(client_uid, None)
         self.received_data_buffers.pop(client_uid, None)
         self.chat_group_manager.client_group_map.pop(client_uid, None)
 
-        if client_uid in self.current_conversation_tasks:
-            task = self.current_conversation_tasks[client_uid]
-            if task and not task.done():
-                task.cancel()
-            self.current_conversation_tasks.pop(client_uid, None)
+        task = self.current_conversation_tasks.pop(client_uid, None)
+        if task and not task.done():
+            task.cancel()
+
+        if context:
+            try:
+                await context.close()
+            except Exception as e:
+                logger.error(
+                    f"Failed to close partially initialized context for {client_uid}: {e}"
+                )
 
         message_handler.cleanup_client(client_uid)
 
