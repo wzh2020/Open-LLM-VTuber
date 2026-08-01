@@ -264,6 +264,37 @@ class WebSocketHandlerLifecycleTest(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn(client_uid, self.handler.chat_group_manager.client_group_map)
         self.assertIn(client_uid, MESSAGE_HANDLER.cleaned)
 
+    def test_config_file_name_validation_rejects_path_traversal(self):
+        self.assertTrue(MODULE._is_safe_config_file_name("conf.yaml"))
+        self.assertTrue(MODULE._is_safe_config_file_name("character.yml"))
+
+        unsafe_names = (
+            "../character.yaml",
+            "..\\character.yaml",
+            "/tmp/character.yaml",
+            "C:\\temp\\character.yaml",
+            "characters/character.yaml",
+            "character.json",
+        )
+        for file_name in unsafe_names:
+            with self.subTest(file_name=file_name):
+                self.assertFalse(MODULE._is_safe_config_file_name(file_name))
+
+    async def test_config_switch_rejects_unsafe_file_name_before_context_call(self):
+        client_uid = "client-a"
+        context = types.SimpleNamespace(handle_config_switch=AsyncMock())
+        websocket = types.SimpleNamespace(send_text=AsyncMock())
+        self.handler.client_contexts[client_uid] = context
+
+        await self.handler._handle_config_switch(
+            websocket,
+            client_uid,
+            {"file": "../outside.yaml"},
+        )
+
+        context.handle_config_switch.assert_not_awaited()
+        websocket.send_text.assert_awaited_once()
+
 
 if __name__ == "__main__":
     unittest.main()
