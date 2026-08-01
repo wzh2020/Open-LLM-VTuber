@@ -3,6 +3,7 @@ from fastapi import WebSocket, WebSocketDisconnect
 import asyncio
 import json
 from enum import Enum
+from pathlib import PurePosixPath, PureWindowsPath
 import numpy as np
 from loguru import logger
 
@@ -56,6 +57,25 @@ class WSMessage(TypedDict, total=False):
     history_uid: Optional[str]
     file: Optional[str]
     display_text: Optional[dict]
+
+
+def _is_safe_config_file_name(file_name: str) -> bool:
+    """Return whether a client-supplied configuration name is a plain YAML file."""
+    if not isinstance(file_name, str) or not file_name:
+        return False
+
+    if "/" in file_name or "\\" in file_name:
+        return False
+
+    posix_path = PurePosixPath(file_name)
+    windows_path = PureWindowsPath(file_name)
+    if posix_path.is_absolute() or windows_path.is_absolute():
+        return False
+
+    if posix_path.name != file_name or windows_path.name != file_name:
+        return False
+
+    return posix_path.suffix.lower() in {".yaml", ".yml"}
 
 
 class WebSocketHandler:
@@ -562,6 +582,20 @@ class WebSocketHandler:
         """Handle switching to a different configuration"""
         config_file_name = data.get("file")
         if config_file_name:
+            if not _is_safe_config_file_name(config_file_name):
+                logger.warning(
+                    f"Rejected unsafe configuration file name: {config_file_name!r}"
+                )
+                await websocket.send_text(
+                    json.dumps(
+                        {
+                            "type": "error",
+                            "message": "Invalid configuration file name",
+                        }
+                    )
+                )
+                return
+
             context = self.client_contexts[client_uid]
             await context.handle_config_switch(websocket, config_file_name)
 
