@@ -25,6 +25,9 @@ jobs:
         with:
           python-version: "3.10"
 
+      - name: Verify optional live-provider and soak runners parse
+        run: python -m py_compile scripts/r0_real_provider_smoke.py scripts/r0_live_soak.py
+
       - name: Run dependency-isolated lifecycle tests
         run: python -m unittest discover -s tests/unit -p "test_*.py" -v
 
