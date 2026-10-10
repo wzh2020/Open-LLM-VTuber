@@ -66,7 +66,11 @@ def _load_server():
     )
     _install_module(f"{pkg}.service_context", ServiceContext=_ServiceContext)
     _install_module(f"{pkg}.websocket_handler", WebSocketHandler=_WebSocketHandler)
-    _install_module(f"{pkg}.provider_access", serialize_shared_engines=lambda _c: {})
+    _install_module(
+        f"{pkg}.provider_access",
+        serialize_shared_engines=lambda _c: {},
+        close_shared_engines=AsyncMock(),
+    )
     _install_module(f"{pkg}.config_manager").__path__ = []
     _install_module(f"{pkg}.config_manager.utils", Config=object)
 
