@@ -14,6 +14,7 @@ from pathlib import Path
 import numpy as np  # noqa: F401
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from loguru import logger
 
 ROOT = Path(__file__).resolve().parents[2] / "src" / "open_llm_vtuber"
 PKG = "r0_ws_asgi_integration_pkg"
@@ -222,9 +223,16 @@ class ActualASGIWebSocketTest(unittest.TestCase):
         self.assertEqual(self.handler.client_connections, {})
         self.assertTrue(all(ctx.closed for ctx in TestServiceContext.instances))
 
-    def test_reconnect_stress_40_cycles_has_no_session_registry_growth(self):
+    def test_reconnect_stress_1000_cycles_has_no_session_registry_growth(self):
+        logger.disable(PKG)
+        try:
+            self._assert_reconnect_stress()
+        finally:
+            logger.enable(PKG)
+
+    def _assert_reconnect_stress(self):
         with TestClient(self.app) as client:
-            for _ in range(40):
+            for _ in range(1000):
                 with client.websocket_connect("/client-ws") as ws:
                     uid = self._handshake(ws)
                     ws.send_json({"type": "heartbeat"})
@@ -233,9 +241,9 @@ class ActualASGIWebSocketTest(unittest.TestCase):
                 self.assertEqual(self.handler.current_conversation_tasks, {})
                 self.assertEqual(self.handler.received_data_buffers, {})
 
-        self.assertEqual(len(TestServiceContext.instances), 40)
+        self.assertEqual(len(TestServiceContext.instances), 1000)
         self.assertTrue(all(ctx.closed for ctx in TestServiceContext.instances))
-        self.assertEqual(len(MESSAGES.cleaned), 40)
+        self.assertEqual(len(MESSAGES.cleaned), 1000)
 
 
 if __name__ == "__main__":
