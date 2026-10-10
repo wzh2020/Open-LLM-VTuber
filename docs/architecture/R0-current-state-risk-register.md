@@ -32,11 +32,14 @@ Risk ratings:
 | R0-R16 | Server shutdown cleanup is incomplete for active sessions | `atexit` only clears cache; active session resources require async close | High | Medium | P1 | Add FastAPI lifespan shutdown management and close all active contexts |
 | R0-R17 | Shared ASR/TTS engines have no declared concurrency contract | Engines are reused across sessions without capability metadata | High | Medium | P1 | Classify adapters as shareable, serialized, pooled, or session-scoped |
 | R0-R18 | Upstream v2 is too immature to serve as the current product base | v2 branch is an alpha skeleton without a settled dependency/runtime implementation | Medium | High | P1 | Continue on hardened v1 while tracking and selectively adopting v2 protocols |
-
 | R0-R19 | Turn cancellation may allow late TTS/audio output or cross-turn leakage | Current turn tasks/outputs lack a single versioned cancellation state machine | High | Medium | P0 | Add per-turn generation and state transitions; reject stale events |
 | R0-R20 | Input/audio and TTS queues lack enforceable backpressure | Audio buffers and work queues can grow under untrusted/high-rate input | High | Medium | P0 | Limit buffers and concurrent jobs; return typed overload events |
 | R0-R21 | Role configuration switch is not transactionally staged | Agent/provider and role objects can be replaced incrementally before success | High | Medium | P1 | Validate and initialize candidate before atomic swap; rollback on failure |
 | R0-R22 | Independent close failures may prevent later resource closures | ServiceContext.close currently closes resources sequentially | High | Medium | P0 | Idempotent best-effort composite close and fault-injection tests |
+
+| R0-R23 | MCP stdio/AnyIO cancel scopes may be exited by the wrong async task | Real CI MCP subprocess run raised a cross-task cancel-scope exception | Critical | High | P0 | Per-server single-task worker implemented, 8 integration tests passed; maintain regression |
+| R0-R24 | Unconstrained MCP 1.6/Pydantic upgrades can fail imports | Real integration test initially failed to import internal Pydantic helper | High | High | P1 | Pin tested integration pair and define deployment lockfile in R0.6 |
+| R0-R25 | MCP worker has no queue limit or restart policy for arbitrary mid-session crashes | Per-server worker serializes calls but does not implement backpressure and transparent recovery | High | Medium | P1 | Add bounded queue, fail-pending semantics and worker-restart integration scenarios in R0.2 |
 
 ## 3. Initial Component Scope Rules
 
