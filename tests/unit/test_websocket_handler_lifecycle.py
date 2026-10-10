@@ -339,6 +339,35 @@ class WebSocketHandlerLifecycleTest(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(task.done())
         self.assertTrue(was_finalized.is_set())
 
+    async def test_shutdown_drains_all_registered_sessions(self):
+        first = _SessionContext()
+        second = _SessionContext()
+        self.handler.client_contexts["one"] = first
+        self.handler.client_contexts["two"] = second
+        self.handler.client_connections["one"] = object()
+        self.handler.client_connections["two"] = object()
+        self.handler.current_conversation_tasks["one"] = _FakeTask()
+
+        await self.handler.shutdown()
+        await self.handler.shutdown()
+
+        self.assertTrue(self.handler.shutting_down)
+        self.assertTrue(first.closed)
+        self.assertTrue(second.closed)
+        self.assertEqual(self.handler.client_contexts, {})
+        self.assertEqual(self.handler.client_connections, {})
+        self.assertEqual(self.handler.current_conversation_tasks, {})
+
+    async def test_shutdown_blocks_new_session_registration(self):
+        await self.handler.shutdown()
+        session = _SessionContext()
+        websocket = types.SimpleNamespace(send_text=AsyncMock())
+
+        with self.assertRaisesRegex(RuntimeError, "shutting down"):
+            await self.handler._store_client_data(websocket, "late", session)
+
+        self.assertNotIn("late", self.handler.client_contexts)
+
     def test_config_file_name_validation_rejects_path_traversal(self):
         self.assertTrue(MODULE._is_safe_config_file_name("conf.yaml"))
         self.assertTrue(MODULE._is_safe_config_file_name("character.yml"))
