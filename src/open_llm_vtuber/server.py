@@ -18,6 +18,7 @@ from starlette.staticfiles import StaticFiles as StarletteStaticFiles
 from .routes import init_client_ws_route, init_webtool_routes, init_proxy_route
 from .service_context import ServiceContext
 from .websocket_handler import WebSocketHandler
+from .provider_access import serialize_shared_engines
 from .config_manager.utils import Config
 
 
@@ -161,6 +162,11 @@ class WebSocketServer:
         try:
             if not self._initialized:
                 await self.initialize()
+            # This is intentionally installed before accepting connections.
+            # Both per-session cache references and /asr, /tts-ws see the same gates.
+            self.shared_provider_gates = serialize_shared_engines(
+                self.default_context_cache
+            )
             yield
         finally:
             try:
