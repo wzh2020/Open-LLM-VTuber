@@ -30,6 +30,7 @@ Status: **IN PROGRESS**. Existing G0-G7 acceptance gates remain binding; the bat
 - [x] Add real MCP subprocess and ASGI WebSocket integration tests (8 PASS)
 - [ ] Audit ASR/TTS/VAD adapter sharing and concurrency using production providers
 - [x] Run 1000 ASGI reconnect and eight MCP subprocess-restart cycles
-- [ ] Run mixed-workload RSS/FD and 24-hour soak tests
+- [x] Run short real ASGI/MCP mixed-workload RSS/FD recovery test (120 WS / 6 MCP, RSS +0.5 MiB, FD delta 0)
+- [ ] Run the 24-hour production-provider live-server soak and real-model ASR/LLM/TTS test
 
-R0.1 remains incomplete after the third microbatch. See [integration evidence](../evaluation/R0.1-microbatch-03-integration.md). Next: provider-level concurrent access audit, real model-backed end-to-end smoke and longer resource soak.
+R0.1 remains incomplete after the fourth microbatch. See [third-batch integration evidence](../evaluation/R0.1-microbatch-03-integration.md) and [fourth-batch shared-provider and soak evidence](../evaluation/R0.1-microbatch-04-providers-soak.md). Shared default engines are conservatively serialized, but production models and 24-hour live-server soak are still NOT VERIFIED.
