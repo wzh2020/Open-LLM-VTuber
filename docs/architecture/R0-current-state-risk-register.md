@@ -33,6 +33,11 @@ Risk ratings:
 | R0-R17 | Shared ASR/TTS engines have no declared concurrency contract | Engines are reused across sessions without capability metadata | High | Medium | P1 | Classify adapters as shareable, serialized, pooled, or session-scoped |
 | R0-R18 | Upstream v2 is too immature to serve as the current product base | v2 branch is an alpha skeleton without a settled dependency/runtime implementation | Medium | High | P1 | Continue on hardened v1 while tracking and selectively adopting v2 protocols |
 
+| R0-R19 | Turn cancellation may allow late TTS/audio output or cross-turn leakage | Current turn tasks/outputs lack a single versioned cancellation state machine | High | Medium | P0 | Add per-turn generation and state transitions; reject stale events |
+| R0-R20 | Input/audio and TTS queues lack enforceable backpressure | Audio buffers and work queues can grow under untrusted/high-rate input | High | Medium | P0 | Limit buffers and concurrent jobs; return typed overload events |
+| R0-R21 | Role configuration switch is not transactionally staged | Agent/provider and role objects can be replaced incrementally before success | High | Medium | P1 | Validate and initialize candidate before atomic swap; rollback on failure |
+| R0-R22 | Independent close failures may prevent later resource closures | ServiceContext.close currently closes resources sequentially | High | Medium | P0 | Idempotent best-effort composite close and fault-injection tests |
+
 ## 3. Initial Component Scope Rules
 
 | Component | Initial scope decision | Rationale |
