@@ -11,6 +11,7 @@ from contextlib import AsyncExitStack
 from datetime import timedelta
 from typing import Any
 
+from anyio import fail_after
 from loguru import logger
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
@@ -19,6 +20,7 @@ from mcp.types import Tool
 from .server_registry import ServerRegistry
 
 DEFAULT_TIMEOUT = timedelta(seconds=30)
+STARTUP_TIMEOUT_SECONDS = 5.0
 
 
 class _StdioWorker:
@@ -67,7 +69,10 @@ class _StdioWorker:
                 session = await stack.enter_async_context(
                     ClientSession(read, write, read_timeout_seconds=timeout)
                 )
-                await session.initialize()
+                # A crashed or unresponsive child must not hold startup forever.
+                # AnyIO keeps this timeout in the owning worker task.
+                with fail_after(STARTUP_TIMEOUT_SECONDS):
+                    await session.initialize()
                 self._on_connect(session)
                 self._ready.set_result(True)
                 while True:
