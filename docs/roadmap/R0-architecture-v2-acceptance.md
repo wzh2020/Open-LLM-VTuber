@@ -24,10 +24,12 @@ Status: **IN PROGRESS**. Existing G0-G7 acceptance gates remain binding; the bat
 - [x] Implement cleanup for MCP/Agent failures **before** registration
 - [x] Await cancellation of real asyncio conversation tasks before closing session state
 - [x] Add regression tests for those behaviors
-- [ ] Verify GitHub Actions success and required style checks
+- [x] Verify GitHub Actions success and required correctness checks (full legacy Ruff debt advisory)
 - [x] Implement an explicit provisional resource registry / idempotent close
 - [x] Add app-wide lifespan shutdown, owner-scoped resources, and late-registration barrier
-- [ ] Audit provider adapter sharing and concurrency; add real MCP/WebSocket integration tests
-- [ ] Run repeated connection/teardown leak tests
+- [x] Add real MCP subprocess and ASGI WebSocket integration tests (8 PASS)
+- [ ] Audit ASR/TTS/VAD adapter sharing and concurrency using production providers
+- [x] Run 1000 ASGI reconnect and eight MCP subprocess-restart cycles
+- [ ] Run mixed-workload RSS/FD and 24-hour soak tests
 
-The first microbatch is not R0.1 completion. Next action after validated PR is lifecycle manager extraction and cancellation integration testing.
+R0.1 remains incomplete after the third microbatch. See [integration evidence](../evaluation/R0.1-microbatch-03-integration.md). Next: provider-level concurrent access audit, real model-backed end-to-end smoke and longer resource soak.
