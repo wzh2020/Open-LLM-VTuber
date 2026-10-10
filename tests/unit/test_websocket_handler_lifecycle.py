@@ -4,6 +4,7 @@ import sys
 import types
 import unittest
 from pathlib import Path
+from typing import ClassVar
 from unittest.mock import AsyncMock
 
 
@@ -57,7 +58,7 @@ class _Copyable:
 
 
 class _SessionContext:
-    instances = []
+    instances: ClassVar[list] = []
 
     def __init__(self):
         self.loaded_kwargs = None
@@ -152,7 +153,7 @@ def _load_websocket_handler_module():
     _install_module(
         "open_llm_vtuber.config_manager.utils",
         scan_config_alts_directory=lambda *_args, **_kwargs: [],
-        scan_bg_directory=lambda: [],
+        scan_bg_directory=list,
     )
 
     conversations_package = types.ModuleType("open_llm_vtuber.conversations")
