@@ -17,6 +17,7 @@ from .mcpp.tool_manager import ToolManager
 from .mcpp.mcp_client import MCPClient
 from .mcpp.tool_executor import ToolExecutor
 from .mcpp.tool_adapter import ToolAdapter
+from .resource_scope import AsyncResourceScope
 
 from .asr.asr_factory import ASRFactory
 from .tts.tts_factory import TTSFactory
@@ -59,6 +60,9 @@ class ServiceContext:
         self.tool_adapter: ToolAdapter | None = None
         self.tool_manager: ToolManager | None = None
         self.mcp_client: MCPClient | None = None
+        # Only objects created by this context are registered here.
+        # Cached provider references are not session-owned.
+        self._owned_resources = AsyncResourceScope()
         self.tool_executor: ToolExecutor | None = None
 
         # the system prompt is a combination of the persona prompt and live2d expression prompt
@@ -159,6 +163,9 @@ class ServiceContext:
                 self.mcp_client = MCPClient(
                     self.mcp_server_registery, self.send_text, self.client_uid
                 )
+                self._owned_resources.track(
+                    self.mcp_client, name="session-mcp-client", method="aclose"
+                )
                 logger.info("MCPClient initialized for this session.")
             else:
                 logger.error(
@@ -188,14 +195,15 @@ class ServiceContext:
             )
 
     async def close(self):
-        """Clean up resources, especially the MCPClient."""
+        """Idempotently close all owned Agent/MCP resources, including replaced ones."""
         logger.info("Closing ServiceContext resources...")
-        if self.mcp_client:
-            logger.info(f"Closing MCPClient for context instance {id(self)}...")
-            await self.mcp_client.aclose()
+        try:
+            await self._owned_resources.aclose()
+        finally:
+            # Clear references even when one closer failed. Shared ASR/TTS/VAD
+            # engines must never be closed by a client session.
             self.mcp_client = None
-        if self.agent_engine and hasattr(self.agent_engine, "close"):
-            await self.agent_engine.close()  # Ensure agent resources are also closed
+            self.agent_engine = None
         logger.info("ServiceContext closed.")
 
     async def load_cache(
@@ -392,6 +400,10 @@ class ServiceContext:
                 tool_executor=self.tool_executor,
                 mcp_prompt_string=self.mcp_prompt,
             )
+            if hasattr(self.agent_engine, "close"):
+                self._owned_resources.track(
+                    self.agent_engine, name="session-agent", method="close"
+                )
 
             logger.debug(f"Agent choice: {agent_config.conversation_agent_choice}")
             logger.debug(f"System prompt: {system_prompt}")
