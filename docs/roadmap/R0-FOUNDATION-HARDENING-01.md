@@ -1,5 +1,7 @@
 # R0-FOUNDATION-HARDENING-01
 
+> **2026-10-10 architecture amendment (v2):** [Foundation Architecture Baseline v2](../architecture/Foundation-Architecture-Baseline-v2.md), [ADR 0001](../adr/0001-runtime-scopes-and-lifecycle.md), and [R0.1-R0.7 acceptance matrix](R0-architecture-v2-acceptance.md) refine the original execution contract. Existing G0-G7 gates remain mandatory. No legacy item is silently considered complete.
+
 ## 1. Purpose
 
 This milestone turns the current Open-LLM-VTuber v1 fork into a safe, testable, observable, and evolvable baseline for a long-lived personal AI companion.
