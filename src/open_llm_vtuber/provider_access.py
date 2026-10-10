@@ -4,6 +4,8 @@ The wrapper serializes calls to potentially stateful ASR/TTS/VAD providers.
 It is not used for per-session Agents or shared MCPClient transports.
 """
 import asyncio
+import inspect
+import logging
 import threading
 from typing import Any
 
@@ -82,3 +84,39 @@ def serialize_shared_engines(default_context: Any) -> dict[str, SerializedProvid
             setattr(default_context, field, engine)
         guarded[field] = engine
     return guarded
+
+
+logger = logging.getLogger(__name__)
+
+
+async def close_shared_engines(default_context: Any) -> None:
+    """Release app-owned engines after all sessions have drained.
+
+    Only invoke a provider's declared close/aclose method. The operation is
+    best-effort, deduplicated and idempotent at the application scope.
+    """
+    if getattr(default_context, "_r0_shared_engines_closed", False):
+        return
+    setattr(default_context, "_r0_shared_engines_closed", True)
+    seen: set[int] = set()
+    for field in ("asr_engine", "tts_engine", "vad_engine"):
+        current = getattr(default_context, field, None)
+        if current is None:
+            continue
+        provider = (
+            current.original_provider
+            if isinstance(current, SerializedProvider)
+            else current
+        )
+        if id(provider) in seen:
+            continue
+        seen.add(id(provider))
+        closer = getattr(provider, "aclose", None) or getattr(provider, "close", None)
+        if closer is None:
+            continue
+        try:
+            result = closer()
+            if inspect.isawaitable(result):
+                await result
+        except Exception:
+            logger.exception("Failed to close app-owned provider: %s", field)
