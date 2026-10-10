@@ -36,7 +36,8 @@ class _StdioWorker:
         self._closing = False
 
     async def ready(self):
-        await self._ready
+        # Caller timeouts must not cancel the shared worker startup Future.
+        await asyncio.shield(self._ready)
 
     async def invoke(self, operation, *args):
         await self.ready()
