@@ -65,6 +65,16 @@
 6. Introduce the history repository abstraction and SQLite schema.
 7. Add structured lifecycle and latency observability.
 
+## 2026-10-10: Architecture Baseline v2 / first R0.1 microbatch
+
+- Created a feature branch from `develop`, leaving `main` and `develop` unchanged until review.
+- Added the target architecture baseline, explicit resource ownership ADR, and seven-batch acceptance matrix.
+- Added pre-registration cleanup for failed Agent/MCP construction.
+- Added bounded task cancellation joins for normal disconnect and failed connection cleanup.
+- Added four additional unit-test cases for partial initialization and real asyncio task finalization.
+- **Evidence status:** Code and test definitions are committed, but live remote CI and stress testing must be checked before claiming PASS. Previous five-test result does not verify new changes.
+- R0.1 remains IN PROGRESS; subsequent work includes a provisional resource registry, FastAPI lifespan shutdown, idempotent close and shared-provider concurrency contracts.
+
 ## Known Limitation
 
 The current path hardening protects the public WebSocket configuration-switch entry point. Canonical containment must still be enforced inside the underlying configuration resolver so future internal callers cannot bypass the boundary.
