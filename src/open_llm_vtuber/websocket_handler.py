@@ -154,6 +154,7 @@ class WebSocketHandler:
         Raises:
             Exception: If initialization fails
         """
+        session_service_context = None
         try:
             session_service_context = await self._init_service_context(
                 websocket.send_text, client_uid
@@ -173,7 +174,17 @@ class WebSocketHandler:
             logger.error(
                 f"Failed to initialize connection for client {client_uid}: {e}"
             )
-            await self._cleanup_failed_connection(client_uid)
+            # _store_client_data may reject registration during shutdown;
+            # the initialized context would then be absent from the registry.
+            was_registered = (
+                session_service_context is not None
+                and self.client_contexts.get(client_uid) is session_service_context
+            )
+            try:
+                await self._cleanup_failed_connection(client_uid)
+            finally:
+                if session_service_context is not None and not was_registered:
+                    await session_service_context.close()
             raise
 
     async def _store_client_data(
