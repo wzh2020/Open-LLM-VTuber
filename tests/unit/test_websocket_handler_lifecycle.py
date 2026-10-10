@@ -358,6 +358,20 @@ class WebSocketHandlerLifecycleTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.handler.client_connections, {})
         self.assertEqual(self.handler.current_conversation_tasks, {})
 
+    async def test_shutdown_race_closes_unregistered_context(self):
+        session = _SessionContext()
+        self.handler._init_service_context = AsyncMock(return_value=session)
+        self.handler._send_initial_messages = AsyncMock()
+        await self.handler.shutdown()
+        websocket = types.SimpleNamespace(send_text=AsyncMock())
+
+        with self.assertRaisesRegex(RuntimeError, "shutting down"):
+            await self.handler.handle_new_connection(websocket, "provisional")
+
+        self.assertTrue(session.closed)
+        self.assertNotIn("provisional", self.handler.client_contexts)
+        self.handler._send_initial_messages.assert_not_awaited()
+
     async def test_shutdown_blocks_new_session_registration(self):
         await self.handler.shutdown()
         session = _SessionContext()
