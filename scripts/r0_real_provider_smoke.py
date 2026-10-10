@@ -1,8 +1,9 @@
 """Opt-in real ASR -> Agent/LLM -> TTS smoke using production factories.
 
 Run locally from repository root with actual conf.yaml, model files/provider
-credentials and a 16kHz 16-bit PCM WAV sample. NOT executed in keyless CI.
-No fake providers are installed and no full transcripts or prompts are logged.
+credentials and a 16kHz PCM WAV sample. NOT executed in keyless CI.
+No fake providers are installed. The script's JSON report omits raw text,
+but production/provider loggers may still include sensitive prompts: protect logs.
 """
 import argparse
 import asyncio
@@ -120,8 +121,9 @@ def main():
     parser.add_argument("--config", type=Path, default=Path("conf.yaml"))
     parser.add_argument("--wav", type=Path, required=True, help="16kHz sample")
     parser.add_argument("--timeout", type=float, default=120.0)
-    parser.add_argument("--report", type=Path, default=Path("r0-real-smoke-result.json"))
+    parser.add_argument("--report", type=Path, default=Path("artifacts/r0-real-smoke-result.json"))
     args = parser.parse_args()
+    args.report.parent.mkdir(parents=True, exist_ok=True)
     try:
         result = asyncio.run(_main(args))
     except Exception as exc:
