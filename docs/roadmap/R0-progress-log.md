@@ -6,7 +6,7 @@
 - Branch: `develop`
 - Upstream-compatible branch: `main`
 - Verified baseline: `992309c0aa19845960228f880013d4685fde93b5`
-- Start date: 2026-08-01
+- Start date: 2026-10-10
 
 ## Completed
 
@@ -86,6 +86,18 @@
 - New dependency-isolated tests cover resource LIFO/exception isolation/concurrent idempotence, lifespan success/failure, shutdown rejection and provisional registration races.
 - **GitHub Actions verified:** Foundation Tests `19/19` PASS and required Ruff correctness gate PASS at commit `3d670259f4ef8a4bde45a09ef8d5edddad883ef4` (runs `38018469032`, `38018469105`).
 - **Not yet verified:** real FastAPI WebSocket + MCP subprocess integration, task-cancellation hard timeout semantics, close behavior of every provider, 1000-connect stress and 24-hour soak.
+
+## 2026-10-10: R0.1 third microbatch — real transport and fault injection
+
+- Installed separate GitHub Actions integration checks for real FastAPI ASGI WebSocket routing and MCP SDK stdio subprocesses.
+- Verified **1000 ASGI reconnect cycles**, two overlapping sessions, heartbeat and registry cleanup (provider engines are stubbed).
+- Verified real MCP subprocess tool discovery/calls, two independent server PIDs, eight consecutive startup/teardown cycles, abandoned-call recovery, cancelled-startup recovery and missing-script failures.
+- Identified and fixed MCP/AnyIO scope ownership: each MCP stdio session now lives within one dedicated per-server async worker task, including teardown.
+- Added five-second MCP initialization deadline and shielded shared worker readiness against caller cancellation.
+- Integration CI uses the compatible `mcp==1.6.0` / `pydantic==2.10.6` pair; broader deployment pinning remains.
+- **CI checkpoint `f000be912cdfaa3ec1e56d61541502e9ea492f03`: 19 unit + 8 integration tests PASS and Ruff correctness PASS** (runs `38019536558`, `38019536573`).
+- Full test scope and nonclaims: [microbatch 03 integration report](../evaluation/R0.1-microbatch-03-integration.md).
+- **R0.1 remains IN PROGRESS** until provider-backed production smoke, adapter reentrancy, mixed-workload RSS/FD and 24-hour soak evidence exist.
 
 ## Known Limitation
 
