@@ -1,7 +1,6 @@
 """R0 shared-provider concurrency contract, without heavyweight model packages."""
 import asyncio
 import importlib.util
-import threading
 import time
 import types
 import unittest
