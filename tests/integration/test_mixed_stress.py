@@ -7,7 +7,6 @@ Linux runner: checks active session state, subprocess exit, RSS/FD recovery.
 import asyncio
 import gc
 import os
-import time
 import unittest
 
 from fastapi.testclient import TestClient
