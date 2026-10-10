@@ -62,6 +62,26 @@ class ProviderAccessTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(raw.peak, 1)
         self.assertEqual(context.asr_engine.peak_concurrency, 1)
 
+    async def test_same_provider_in_multiple_roles_uses_one_lock(self):
+        engine = StrictProvider()
+        cache = types.SimpleNamespace(
+            asr_engine=engine,
+            tts_engine=engine,
+            vad_engine=None,
+        )
+        gates = module.serialize_shared_engines(cache)
+        self.assertIs(gates["asr_engine"], gates["tts_engine"])
+        tasks = [
+            cache.asr_engine.async_transcribe_np(str(i))
+            for i in range(15)
+        ] + [
+            cache.tts_engine.async_generate_audio(str(i))
+            for i in range(15)
+        ]
+        results = await asyncio.gather(*tasks)
+        self.assertEqual(len(results), 30)
+        self.assertEqual(engine.peak, 1)
+
     async def test_tts_serialization_survives_concurrent_requests_and_failures(self):
         raw = StrictProvider()
         wrapper = module.SerializedProvider(raw, "TTS")
@@ -112,7 +132,7 @@ class ProviderAccessTest(unittest.IsolatedAsyncioTestCase):
             asr_engine=engine, tts_engine=engine, vad_engine=None
         )
         wrapped = module.serialize_shared_engines(cache)
-        self.assertIsNot(wrapped["asr_engine"], wrapped["tts_engine"])
+        self.assertIs(wrapped["asr_engine"], wrapped["tts_engine"])
         await module.close_shared_engines(cache)
         await module.close_shared_engines(cache)
         self.assertEqual(engine.count, 1)
