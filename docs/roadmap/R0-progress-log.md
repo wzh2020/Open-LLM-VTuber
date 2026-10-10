@@ -75,6 +75,18 @@
 - **Evidence status:** Code and test definitions are committed, but live remote CI and stress testing must be checked before claiming PASS. Previous five-test result does not verify new changes.
 - R0.1 remains IN PROGRESS; subsequent work includes a provisional resource registry, FastAPI lifespan shutdown, idempotent close and shared-provider concurrency contracts.
 
+## 2026-10-10: R0.1 second microbatch — scoped resource ownership and server lifecycle
+
+- Introduced `AsyncResourceScope`: register acquired Agent/MCP resources immediately, close once in reverse order, attempt remaining closers after one fails.
+- `ServiceContext.close()` now uses the explicit owned-resource registry, avoids closing cached/shared ASR/TTS/VAD engines, and clears session-owned references.
+- The WebSocket handler is owned by `WebSocketServer` rather than being inaccessible in a route closure.
+- Added a shutdown barrier to reject new registrations, drain active client contexts and cancel active session tasks.
+- Connected init/shutdown to FastAPI lifespan; `run_server.py` no longer initializes MCP/Agent in a short-lived separate `asyncio.run` event loop.
+- Closed an additional race: if the server starts shutting down before a provisional session is registered, the provisional context is released.
+- New dependency-isolated tests cover resource LIFO/exception isolation/concurrent idempotence, lifespan success/failure, shutdown rejection and provisional registration races.
+- **GitHub Actions verified:** Foundation Tests `19/19` PASS and required Ruff correctness gate PASS at commit `3d670259f4ef8a4bde45a09ef8d5edddad883ef4` (runs `38018469032`, `38018469105`).
+- **Not yet verified:** real FastAPI WebSocket + MCP subprocess integration, task-cancellation hard timeout semantics, close behavior of every provider, 1000-connect stress and 24-hour soak.
+
 ## Known Limitation
 
 The current path hardening protects the public WebSocket configuration-switch entry point. Canonical containment must still be enforced inside the underlying configuration resolver so future internal callers cannot bypass the boundary.
