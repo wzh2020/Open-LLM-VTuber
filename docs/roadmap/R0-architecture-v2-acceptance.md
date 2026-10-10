@@ -25,8 +25,8 @@ Status: **IN PROGRESS**. Existing G0-G7 acceptance gates remain binding; the bat
 - [x] Await cancellation of real asyncio conversation tasks before closing session state
 - [x] Add regression tests for those behaviors
 - [ ] Verify GitHub Actions success and required style checks
-- [ ] Implement an explicit provisional resource registry / idempotent close
-- [ ] Add app-wide lifespan shutdown and adapter sharing audit
+- [x] Implement an explicit provisional resource registry / idempotent close
+- [x] Add app-wide lifespan shutdown and adapter sharing audit (scope registration and server shutdown are implemented; provider-level concurrency audit is still pending)
 - [ ] Run repeated connection/teardown leak tests
 
 The first microbatch is not R0.1 completion. Next action after validated PR is lifecycle manager extraction and cancellation integration testing.
