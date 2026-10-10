@@ -89,9 +89,33 @@ class WebSocketHandler:
         self.current_conversation_tasks: Dict[str, Optional[asyncio.Task]] = {}
         self.default_context_cache = default_context_cache
         self.received_data_buffers: Dict[str, np.ndarray] = {}
+        self._registration_lock = asyncio.Lock()
+        self._shutting_down = False
 
         # Message handlers mapping
         self._message_handlers = self._init_message_handlers()
+
+    @property
+    def shutting_down(self) -> bool:
+        return self._shutting_down
+
+    async def shutdown(self) -> None:
+        """Prevent registrations, then close all registered sessions."""
+        async with self._registration_lock:
+            self._shutting_down = True
+            client_uids = (
+                set(self.client_connections)
+                | set(self.client_contexts)
+                | set(self.current_conversation_tasks)
+            )
+
+        results = await asyncio.gather(
+            *(self.handle_disconnect(uid) for uid in client_uids),
+            return_exceptions=True,
+        )
+        for uid, result in zip(client_uids, results):
+            if isinstance(result, BaseException):
+                logger.error(f"Shutdown cleanup failed for {uid}: {result}")
 
     def _init_message_handlers(self) -> Dict[str, Callable]:
         """Initialize message type to handler mapping"""
@@ -159,11 +183,13 @@ class WebSocketHandler:
         session_service_context: ServiceContext,
     ):
         """Store client data and initialize group status"""
-        self.client_connections[client_uid] = websocket
-        self.client_contexts[client_uid] = session_service_context
-        self.received_data_buffers[client_uid] = np.array([])
-
-        self.chat_group_manager.client_group_map[client_uid] = ""
+        async with self._registration_lock:
+            if self._shutting_down:
+                raise RuntimeError("Server is shutting down")
+            self.client_connections[client_uid] = websocket
+            self.client_contexts[client_uid] = session_service_context
+            self.received_data_buffers[client_uid] = np.array([])
+            self.chat_group_manager.client_group_map[client_uid] = ""
         await self.send_group_update(websocket, client_uid)
 
     async def _send_initial_messages(
