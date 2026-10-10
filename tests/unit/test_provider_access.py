@@ -99,6 +99,43 @@ class ProviderAccessTest(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(wrapper.peak_concurrency, 1)
 
+    async def test_app_owned_shared_providers_close_once(self):
+        class Closable:
+            def __init__(self):
+                self.count = 0
+
+            async def aclose(self):
+                self.count += 1
+
+        engine = Closable()
+        cache = types.SimpleNamespace(
+            asr_engine=engine, tts_engine=engine, vad_engine=None
+        )
+        wrapped = module.serialize_shared_engines(cache)
+        self.assertIsNot(wrapped["asr_engine"], wrapped["tts_engine"])
+        await module.close_shared_engines(cache)
+        await module.close_shared_engines(cache)
+        self.assertEqual(engine.count, 1)
+
+    async def test_bad_shared_engine_does_not_block_another_close(self):
+        class Bad:
+            async def aclose(self):
+                raise RuntimeError("provider close error")
+
+        class Good:
+            def __init__(self):
+                self.closed = False
+
+            def close(self):
+                self.closed = True
+
+        good = Good()
+        cache = types.SimpleNamespace(asr_engine=Bad(), tts_engine=good)
+        module.serialize_shared_engines(cache)
+        with self.assertLogs(module.logger.name, level="ERROR"):
+            await module.close_shared_engines(cache)
+        self.assertTrue(good.closed)
+
     def test_sync_vad_not_entered_concurrently_across_threads(self):
         class StrictVAD:
             def __init__(self):
