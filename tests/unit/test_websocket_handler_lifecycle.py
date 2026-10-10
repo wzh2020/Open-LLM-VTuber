@@ -1,3 +1,4 @@
+import asyncio
 import importlib.util
 import sys
 import types
@@ -263,6 +264,79 @@ class WebSocketHandlerLifecycleTest(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn(client_uid, self.handler.current_conversation_tasks)
         self.assertNotIn(client_uid, self.handler.chat_group_manager.client_group_map)
         self.assertIn(client_uid, MESSAGE_HANDLER.cleaned)
+
+    async def test_unregistered_agent_initialization_failure_closes_context(self):
+        async def failing_agent_init(_self, _config, _persona):
+            raise RuntimeError("simulated agent initialization failure")
+
+        original = _SessionContext.init_agent
+        _SessionContext.init_agent = failing_agent_init
+        try:
+            with self.assertRaisesRegex(RuntimeError, "simulated agent"):
+                await self.handler._init_service_context(AsyncMock(), "pre-register")
+        finally:
+            _SessionContext.init_agent = original
+
+        self.assertEqual(len(_SessionContext.instances), 1)
+        self.assertTrue(_SessionContext.instances[0].closed)
+        self.assertNotIn("pre-register", self.handler.client_contexts)
+
+    async def test_unregistered_mcp_initialization_failure_closes_context(self):
+        original = _SessionContext.load_cache
+
+        async def failing_load_cache(self, **kwargs):
+            await original(self, **kwargs)
+            raise RuntimeError("simulated MCP setup failure")
+
+        _SessionContext.load_cache = failing_load_cache
+        try:
+            with self.assertRaisesRegex(RuntimeError, "simulated MCP"):
+                await self.handler._init_service_context(AsyncMock(), "mcp-failed")
+        finally:
+            _SessionContext.load_cache = original
+
+        self.assertEqual(len(_SessionContext.instances), 1)
+        self.assertTrue(_SessionContext.instances[0].closed)
+
+    async def test_disconnect_awaits_real_task_cancellation(self):
+        was_finalized = asyncio.Event()
+
+        async def long_running():
+            try:
+                await asyncio.sleep(60)
+            finally:
+                was_finalized.set()
+
+        task = asyncio.create_task(long_running())
+        await asyncio.sleep(0)  # Start coroutine before cancellation.
+        uid = "awaited-client"
+        self.handler.current_conversation_tasks[uid] = task
+        context = _SessionContext()
+        self.handler.client_contexts[uid] = context
+
+        await self.handler.handle_disconnect(uid)
+
+        self.assertTrue(task.done())
+        self.assertTrue(task.cancelled())
+        self.assertTrue(was_finalized.is_set())
+        self.assertTrue(context.closed)
+
+    async def test_failed_connection_awaits_real_task_cancellation(self):
+        was_finalized = asyncio.Event()
+
+        async def long_running():
+            try:
+                await asyncio.sleep(60)
+            finally:
+                was_finalized.set()
+
+        task = asyncio.create_task(long_running())
+        await asyncio.sleep(0)
+        self.handler.current_conversation_tasks["failed-task"] = task
+        await self.handler._cleanup_failed_connection("failed-task")
+
+        self.assertTrue(task.done())
+        self.assertTrue(was_finalized.is_set())
 
     def test_config_file_name_validation_rejects_path_traversal(self):
         self.assertTrue(MODULE._is_safe_config_file_name("conf.yaml"))
