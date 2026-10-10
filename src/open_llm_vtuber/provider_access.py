@@ -71,6 +71,7 @@ class SerializedProvider:
 def serialize_shared_engines(default_context: Any) -> dict[str, SerializedProvider]:
     """Wrap each shared default engine exactly once, including supplied caches."""
     guarded: dict[str, SerializedProvider] = {}
+    by_identity: dict[int, SerializedProvider] = {}
     for field, kind in (
         ("asr_engine", "ASR"),
         ("tts_engine", "TTS"),
@@ -79,10 +80,22 @@ def serialize_shared_engines(default_context: Any) -> dict[str, SerializedProvid
         engine = getattr(default_context, field, None)
         if engine is None:
             continue
-        if not isinstance(engine, SerializedProvider):
-            engine = SerializedProvider(engine, kind=kind)
-            setattr(default_context, field, engine)
-        guarded[field] = engine
+        raw = (
+            engine.original_provider
+            if isinstance(engine, SerializedProvider)
+            else engine
+        )
+        # A provider wired to more than one role must share ONE lock.
+        wrapper = by_identity.get(id(raw))
+        if wrapper is None:
+            wrapper = (
+                engine
+                if isinstance(engine, SerializedProvider)
+                else SerializedProvider(raw, kind=kind)
+            )
+            by_identity[id(raw)] = wrapper
+        setattr(default_context, field, wrapper)
+        guarded[field] = wrapper
     return guarded
 
 
