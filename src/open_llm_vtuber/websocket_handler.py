@@ -89,9 +89,33 @@ class WebSocketHandler:
         self.current_conversation_tasks: Dict[str, Optional[asyncio.Task]] = {}
         self.default_context_cache = default_context_cache
         self.received_data_buffers: Dict[str, np.ndarray] = {}
+        self._registration_lock = asyncio.Lock()
+        self._shutting_down = False
 
         # Message handlers mapping
         self._message_handlers = self._init_message_handlers()
+
+    @property
+    def shutting_down(self) -> bool:
+        return self._shutting_down
+
+    async def shutdown(self) -> None:
+        """Prevent registrations, then close all registered sessions."""
+        async with self._registration_lock:
+            self._shutting_down = True
+            client_uids = (
+                set(self.client_connections)
+                | set(self.client_contexts)
+                | set(self.current_conversation_tasks)
+            )
+
+        results = await asyncio.gather(
+            *(self.handle_disconnect(uid) for uid in client_uids),
+            return_exceptions=True,
+        )
+        for uid, result in zip(client_uids, results):
+            if isinstance(result, BaseException):
+                logger.error(f"Shutdown cleanup failed for {uid}: {result}")
 
     def _init_message_handlers(self) -> Dict[str, Callable]:
         """Initialize message type to handler mapping"""
@@ -130,6 +154,7 @@ class WebSocketHandler:
         Raises:
             Exception: If initialization fails
         """
+        session_service_context = None
         try:
             session_service_context = await self._init_service_context(
                 websocket.send_text, client_uid
@@ -149,7 +174,17 @@ class WebSocketHandler:
             logger.error(
                 f"Failed to initialize connection for client {client_uid}: {e}"
             )
-            await self._cleanup_failed_connection(client_uid)
+            # _store_client_data may reject registration during shutdown;
+            # the initialized context would then be absent from the registry.
+            was_registered = (
+                session_service_context is not None
+                and self.client_contexts.get(client_uid) is session_service_context
+            )
+            try:
+                await self._cleanup_failed_connection(client_uid)
+            finally:
+                if session_service_context is not None and not was_registered:
+                    await session_service_context.close()
             raise
 
     async def _store_client_data(
@@ -159,11 +194,13 @@ class WebSocketHandler:
         session_service_context: ServiceContext,
     ):
         """Store client data and initialize group status"""
-        self.client_connections[client_uid] = websocket
-        self.client_contexts[client_uid] = session_service_context
-        self.received_data_buffers[client_uid] = np.array([])
-
-        self.chat_group_manager.client_group_map[client_uid] = ""
+        async with self._registration_lock:
+            if self._shutting_down:
+                raise RuntimeError("Server is shutting down")
+            self.client_connections[client_uid] = websocket
+            self.client_contexts[client_uid] = session_service_context
+            self.received_data_buffers[client_uid] = np.array([])
+            self.chat_group_manager.client_group_map[client_uid] = ""
         await self.send_group_update(websocket, client_uid)
 
     async def _send_initial_messages(
@@ -200,33 +237,44 @@ class WebSocketHandler:
     ) -> ServiceContext:
         """Initialize an isolated service context for a new client session."""
         session_service_context = ServiceContext()
-        await session_service_context.load_cache(
-            config=self.default_context_cache.config.model_copy(deep=True),
-            system_config=self.default_context_cache.system_config.model_copy(
-                deep=True
-            ),
-            character_config=self.default_context_cache.character_config.model_copy(
-                deep=True
-            ),
-            live2d_model=self.default_context_cache.live2d_model,
-            asr_engine=self.default_context_cache.asr_engine,
-            tts_engine=self.default_context_cache.tts_engine,
-            vad_engine=self.default_context_cache.vad_engine,
-            agent_engine=None,
-            translate_engine=self.default_context_cache.translate_engine,
-            mcp_server_registery=self.default_context_cache.mcp_server_registery,
-            tool_adapter=self.default_context_cache.tool_adapter,
-            send_text=send_text,
-            client_uid=client_uid,
-        )
+        try:
+            await session_service_context.load_cache(
+                config=self.default_context_cache.config.model_copy(deep=True),
+                system_config=self.default_context_cache.system_config.model_copy(
+                    deep=True
+                ),
+                character_config=self.default_context_cache.character_config.model_copy(
+                    deep=True
+                ),
+                live2d_model=self.default_context_cache.live2d_model,
+                asr_engine=self.default_context_cache.asr_engine,
+                tts_engine=self.default_context_cache.tts_engine,
+                vad_engine=self.default_context_cache.vad_engine,
+                agent_engine=None,
+                translate_engine=self.default_context_cache.translate_engine,
+                mcp_server_registery=self.default_context_cache.mcp_server_registery,
+                tool_adapter=self.default_context_cache.tool_adapter,
+                send_text=send_text,
+                client_uid=client_uid,
+            )
 
-        # Agent instances contain mutable conversation memory, interrupt state, and
-        # session-specific tool bindings. They must never be shared between clients.
-        await session_service_context.init_agent(
-            session_service_context.character_config.agent_config,
-            session_service_context.character_config.persona_prompt,
-        )
-        return session_service_context
+            # The Agent is mutable and must be owned by exactly one session.
+            await session_service_context.init_agent(
+                session_service_context.character_config.agent_config,
+                session_service_context.character_config.persona_prompt,
+            )
+            return session_service_context
+        except BaseException:
+            # Failures here occur before client_contexts registration. Without
+            # this cleanup, the normal failed-connection path cannot find the
+            # partially constructed MCP client or Agent.
+            try:
+                await session_service_context.close()
+            except Exception:
+                logger.exception(
+                    f"Could not close partially initialized context for {client_uid}"
+                )
+            raise
 
     async def handle_websocket_communication(
         self, websocket: WebSocket, client_uid: str
@@ -330,43 +378,63 @@ class WebSocketHandler:
             self.client_connections.pop(client_uid, None)
             self.client_contexts.pop(client_uid, None)
             self.received_data_buffers.pop(client_uid, None)
+            self.chat_group_manager.client_group_map.pop(client_uid, None)
 
-            task = self.current_conversation_tasks.pop(client_uid, None)
-            if task and not task.done():
-                task.cancel()
-
-            if context:
+            try:
+                await self._cancel_conversation_task(client_uid)
+            finally:
                 try:
-                    await context.close()
-                except Exception as e:
-                    logger.error(
-                        f"Failed to close service context for client {client_uid}: {e}"
+                    if context:
+                        await context.close()
+                except Exception:
+                    logger.exception(
+                        f"Failed to close service context for client {client_uid}"
                     )
-
-            message_handler.cleanup_client(client_uid)
+                finally:
+                    message_handler.cleanup_client(client_uid)
 
         logger.info(f"Client {client_uid} disconnected")
 
+    async def _cancel_conversation_task(self, client_uid: str) -> None:
+        """Cancel and join a session task before releasing its owned resources."""
+        task = self.current_conversation_tasks.pop(client_uid, None)
+        if task is None:
+            return
+        if not task.done():
+            task.cancel()
+
+        # Some integrations use task-like handles; only asyncio tasks/futures
+        # are safe to await. Never wait for the cleanup task itself.
+        if isinstance(task, asyncio.Future) and task is not asyncio.current_task():
+            try:
+                await asyncio.wait_for(
+                    asyncio.gather(task, return_exceptions=True),
+                    timeout=5.0,
+                )
+            except asyncio.TimeoutError:
+                logger.warning(
+                    f"Timed out joining cancelled conversation for {client_uid}"
+                )
+
     async def _cleanup_failed_connection(self, client_uid: str) -> None:
-        """Clean up resources allocated before connection initialization failed."""
+        """Clean up resources allocated during connection initialization."""
         context = self.client_contexts.pop(client_uid, None)
         self.client_connections.pop(client_uid, None)
         self.received_data_buffers.pop(client_uid, None)
         self.chat_group_manager.client_group_map.pop(client_uid, None)
 
-        task = self.current_conversation_tasks.pop(client_uid, None)
-        if task and not task.done():
-            task.cancel()
-
-        if context:
+        try:
+            await self._cancel_conversation_task(client_uid)
+        finally:
             try:
-                await context.close()
-            except Exception as e:
-                logger.error(
-                    f"Failed to close partially initialized context for {client_uid}: {e}"
+                if context:
+                    await context.close()
+            except Exception:
+                logger.exception(
+                    f"Failed to close partially initialized context for {client_uid}"
                 )
-
-        message_handler.cleanup_client(client_uid)
+            finally:
+                message_handler.cleanup_client(client_uid)
 
     async def broadcast_to_group(
         self, group_members: list[str], message: dict, exclude_uid: str = None

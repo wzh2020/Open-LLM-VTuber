@@ -8,6 +8,7 @@ It uses FastAPI for the server and Starlette for static file serving.
 
 import os
 import shutil
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from starlette.middleware.cors import CORSMiddleware
@@ -16,6 +17,8 @@ from starlette.staticfiles import StaticFiles as StarletteStaticFiles
 
 from .routes import init_client_ws_route, init_webtool_routes, init_proxy_route
 from .service_context import ServiceContext
+from .websocket_handler import WebSocketHandler
+from .provider_access import serialize_shared_engines, close_shared_engines
 from .config_manager.utils import Config
 
 
@@ -72,12 +75,14 @@ class WebSocketServer:
     """
 
     def __init__(self, config: Config, default_context_cache: ServiceContext = None):
-        self.app = FastAPI(title="Open-LLM-VTuber Server")  # Added title for clarity
+        self.app = FastAPI(title="Open-LLM-VTuber Server", lifespan=self._lifespan)
         self.config = config
         self.default_context_cache = (
             default_context_cache or ServiceContext()
         )  # Use provided context or initialize a new empty one waiting to be loaded
         # It will be populated during the initialize method call
+        self._initialized = default_context_cache is not None
+        self.ws_handler = WebSocketHandler(self.default_context_cache)
 
         # Add global CORS middleware
         self.app.add_middleware(
@@ -91,7 +96,10 @@ class WebSocketServer:
         # Include routes, passing the context instance
         # The context will be populated during the initialize step
         self.app.include_router(
-            init_client_ws_route(default_context_cache=self.default_context_cache),
+            init_client_ws_route(
+                default_context_cache=self.default_context_cache,
+                ws_handler=self.ws_handler,
+            ),
         )
         self.app.include_router(
             init_webtool_routes(default_context_cache=self.default_context_cache),
@@ -148,10 +156,33 @@ class WebSocketServer:
             name="frontend",
         )
 
+    @asynccontextmanager
+    async def _lifespan(self, _app: FastAPI):
+        """Initialize on the serving event loop and drain sessions at shutdown."""
+        try:
+            if not self._initialized:
+                await self.initialize()
+            # This is intentionally installed before accepting connections.
+            # Both per-session cache references and /asr, /tts-ws see the same gates.
+            self.shared_provider_gates = serialize_shared_engines(
+                self.default_context_cache
+            )
+            yield
+        finally:
+            try:
+                await self.ws_handler.shutdown()
+            finally:
+                try:
+                    await self.default_context_cache.close()
+                finally:
+                    await close_shared_engines(self.default_context_cache)
+
     async def initialize(self):
-        """Asynchronously load the service context from config.
-        Calling this function is needed if default_context_cache was not provided to the constructor."""
+        """Initialize shared resources; normally called by the FastAPI lifespan."""
+        if self._initialized:
+            return
         await self.default_context_cache.load_from_config(self.config)
+        self._initialized = True
 
     @staticmethod
     def clean_cache():

@@ -6,7 +6,7 @@
 - Branch: `develop`
 - Upstream-compatible branch: `main`
 - Verified baseline: `992309c0aa19845960228f880013d4685fde93b5`
-- Start date: 2026-08-01
+- Start date: 2026-10-10
 
 ## Completed
 
@@ -64,6 +64,52 @@
 5. Define and implement the authentication and CORS configuration contract.
 6. Introduce the history repository abstraction and SQLite schema.
 7. Add structured lifecycle and latency observability.
+
+## 2026-10-10: Architecture Baseline v2 / first R0.1 microbatch
+
+- Created a feature branch from `develop`, leaving `main` and `develop` unchanged until review.
+- Added the target architecture baseline, explicit resource ownership ADR, and seven-batch acceptance matrix.
+- Added pre-registration cleanup for failed Agent/MCP construction.
+- Added bounded task cancellation joins for normal disconnect and failed connection cleanup.
+- Added four additional unit-test cases for partial initialization and real asyncio task finalization.
+- **Evidence status:** Code and test definitions are committed, but live remote CI and stress testing must be checked before claiming PASS. Previous five-test result does not verify new changes.
+- R0.1 remains IN PROGRESS; subsequent work includes a provisional resource registry, FastAPI lifespan shutdown, idempotent close and shared-provider concurrency contracts.
+
+## 2026-10-10: R0.1 second microbatch — scoped resource ownership and server lifecycle
+
+- Introduced `AsyncResourceScope`: register acquired Agent/MCP resources immediately, close once in reverse order, attempt remaining closers after one fails.
+- `ServiceContext.close()` now uses the explicit owned-resource registry, avoids closing cached/shared ASR/TTS/VAD engines, and clears session-owned references.
+- The WebSocket handler is owned by `WebSocketServer` rather than being inaccessible in a route closure.
+- Added a shutdown barrier to reject new registrations, drain active client contexts and cancel active session tasks.
+- Connected init/shutdown to FastAPI lifespan; `run_server.py` no longer initializes MCP/Agent in a short-lived separate `asyncio.run` event loop.
+- Closed an additional race: if the server starts shutting down before a provisional session is registered, the provisional context is released.
+- New dependency-isolated tests cover resource LIFO/exception isolation/concurrent idempotence, lifespan success/failure, shutdown rejection and provisional registration races.
+- **GitHub Actions verified:** Foundation Tests `19/19` PASS and required Ruff correctness gate PASS at commit `3d670259f4ef8a4bde45a09ef8d5edddad883ef4` (runs `38018469032`, `38018469105`).
+- **Not yet verified:** real FastAPI WebSocket + MCP subprocess integration, task-cancellation hard timeout semantics, close behavior of every provider, 1000-connect stress and 24-hour soak.
+
+## 2026-10-10: R0.1 third microbatch — real transport and fault injection
+
+- Installed separate GitHub Actions integration checks for real FastAPI ASGI WebSocket routing and MCP SDK stdio subprocesses.
+- Verified **1000 ASGI reconnect cycles**, two overlapping sessions, heartbeat and registry cleanup (provider engines are stubbed).
+- Verified real MCP subprocess tool discovery/calls, two independent server PIDs, eight consecutive startup/teardown cycles, abandoned-call recovery, cancelled-startup recovery and missing-script failures.
+- Identified and fixed MCP/AnyIO scope ownership: each MCP stdio session now lives within one dedicated per-server async worker task, including teardown.
+- Added five-second MCP initialization deadline and shielded shared worker readiness against caller cancellation.
+- Integration CI uses the compatible `mcp==1.6.0` / `pydantic==2.10.6` pair; broader deployment pinning remains.
+- **CI checkpoint `f000be912cdfaa3ec1e56d61541502e9ea492f03`: 19 unit + 8 integration tests PASS and Ruff correctness PASS** (runs `38019536558`, `38019536573`).
+- Full test scope and nonclaims: [microbatch 03 integration report](../evaluation/R0.1-microbatch-03-integration.md).
+- **R0.1 remains IN PROGRESS** until provider-backed production smoke, adapter reentrancy, mixed-workload RSS/FD and 24-hour soak evidence exist.
+
+## 2026-10-10: R0.1 fourth microbatch — provider concurrency and stability
+
+- Audited shared default ASR/TTS/VAD references; wrapped production serving references with `SerializedProvider` to serialize asynchronous ASR/TTS and synchronous VAD calls.
+- Registered app-owned provider cleanup after session and cached Agent/MCP teardown. Close is idempotent and skips duplicate instances; callback errors do not prevent remaining providers from closing.
+- Added 7 provider unit tests for ASR/TTS request concurrency, injected failures, cancellation, cross-thread VAD, owner cleanup and close exception isolation.
+- Added short mixed-load CI with 120 actual ASGI WebSocket reconnects and six real MCP subprocess lifecycles; observed RSS **+0.5 MiB**, file descriptor delta **0** in one Ubuntu CI run.
+- Added opt-in `scripts/r0_real_provider_smoke.py` for actual ASR -> Agent/LLM -> TTS model calls using a user-configured environment and 16-kHz voice sample.
+- Added opt-in `scripts/r0_live_soak.py` to run 24 hours of live-server WebSocket connections while recording server-process RSS/FD/threads to JSONL. The scripts are syntax checked by CI.
+- **Verified:** 26 unit tests and 12 integration tests PASS, required Ruff correctness PASS at checkpoint `4e9bd0352ad5155e06569205dbc52cf0e4add699` (Foundation run `38021986725`, Ruff run `38021986714`).
+- **NOT VERIFIED:** genuine production-provider E2E, full 24-hour soak, provider-specific parallel throughput benchmarking and deployment compatibility.
+- See [fourth microbatch evidence](../evaluation/R0.1-microbatch-04-providers-soak.md); R0.1 still IN PROGRESS.
 
 ## Known Limitation
 

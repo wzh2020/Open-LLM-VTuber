@@ -12,7 +12,10 @@ from .websocket_handler import WebSocketHandler
 from .proxy_handler import ProxyHandler
 
 
-def init_client_ws_route(default_context_cache: ServiceContext) -> APIRouter:
+def init_client_ws_route(
+    default_context_cache: ServiceContext,
+    ws_handler: WebSocketHandler | None = None,
+) -> APIRouter:
     """
     Create and return API routes for handling the `/client-ws` WebSocket connections.
 
@@ -24,11 +27,14 @@ def init_client_ws_route(default_context_cache: ServiceContext) -> APIRouter:
     """
 
     router = APIRouter()
-    ws_handler = WebSocketHandler(default_context_cache)
+    ws_handler = ws_handler or WebSocketHandler(default_context_cache)
 
     @router.websocket("/client-ws")
     async def websocket_endpoint(websocket: WebSocket):
         """WebSocket endpoint for client connections"""
+        if ws_handler.shutting_down:
+            await websocket.close(code=1012)
+            return
         await websocket.accept()
         client_uid = str(uuid4())
 
