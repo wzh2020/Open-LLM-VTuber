@@ -123,6 +123,71 @@ class RealMCPStdioTest(unittest.IsolatedAsyncioTestCase):
         await first.aclose()
         await second.aclose()
 
+    async def test_cancelled_call_does_not_poison_active_subprocess(self):
+        client = MCPClient(_registry())
+        pid = None
+        try:
+            await asyncio.wait_for(client.list_tools("fixture"), timeout=15)
+            with self.assertRaises(TimeoutError):
+                await asyncio.wait_for(
+                    client.call_tool(
+                        "fixture",
+                        "delayed_identity",
+                        {"value": "abandoned", "milliseconds": 150},
+                    ),
+                    timeout=0.01,
+                )
+            response = await asyncio.wait_for(
+                client.call_tool("fixture", "identity", {"value": "still-alive"}),
+                timeout=15,
+            )
+            pid_str, value = response["content_items"][0]["text"].split(":", 1)
+            pid = int(pid_str)
+            self.assertEqual(value, "still-alive")
+        finally:
+            await client.aclose()
+        if pid is not None:
+            await _await_exit(pid)
+
+    async def test_cancelled_startup_does_not_poison_shared_readiness(self):
+        client = MCPClient(_registry())
+        pid = None
+        try:
+            pending = asyncio.create_task(client.list_tools("fixture"))
+            await asyncio.sleep(0.01)
+            pending.cancel()
+            await asyncio.gather(pending, return_exceptions=True)
+            tools = await asyncio.wait_for(client.list_tools("fixture"), timeout=15)
+            self.assertIn("identity", [tool.name for tool in tools])
+            response = await client.call_tool("fixture", "identity", {"value": "ready"})
+            pid_str, value = response["content_items"][0]["text"].split(":", 1)
+            pid = int(pid_str)
+            self.assertEqual(value, "ready")
+        finally:
+            await client.aclose()
+        if pid is not None:
+            await _await_exit(pid)
+
+    async def test_eight_successive_real_stdio_sessions_leave_no_child(self):
+        pids = []
+        for index in range(8):
+            client = MCPClient(_registry())
+            try:
+                result = await asyncio.wait_for(
+                    client.call_tool(
+                        "fixture", "identity", {"value": str(index)}
+                    ),
+                    timeout=15,
+                )
+                pid_str, value = result["content_items"][0]["text"].split(":", 1)
+                self.assertEqual(value, str(index))
+                pids.append(int(pid_str))
+            finally:
+                await client.aclose()
+        for pid in pids:
+            await _await_exit(pid)
+        self.assertEqual(len(set(pids)), 8)
+
     async def test_unavailable_mcp_server_cleans_its_transport(self):
         missing = FIXTURE.with_name("not_a_real_mcp_server.py")
         client = MCPClient(_registry(missing))
