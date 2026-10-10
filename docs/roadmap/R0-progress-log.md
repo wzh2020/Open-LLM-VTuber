@@ -103,11 +103,11 @@
 
 - Audited shared default ASR/TTS/VAD references; wrapped production serving references with `SerializedProvider` to serialize asynchronous ASR/TTS and synchronous VAD calls.
 - Registered app-owned provider cleanup after session and cached Agent/MCP teardown. Close is idempotent and skips duplicate instances; callback errors do not prevent remaining providers from closing.
-- Added 6 provider unit tests for ASR/TTS request concurrency, injected failures, cancellation, cross-thread VAD, owner cleanup and close exception isolation.
+- Added 7 provider unit tests for ASR/TTS request concurrency, injected failures, cancellation, cross-thread VAD, owner cleanup and close exception isolation.
 - Added short mixed-load CI with 120 actual ASGI WebSocket reconnects and six real MCP subprocess lifecycles; observed RSS **+0.5 MiB**, file descriptor delta **0** in one Ubuntu CI run.
 - Added opt-in `scripts/r0_real_provider_smoke.py` for actual ASR -> Agent/LLM -> TTS model calls using a user-configured environment and 16-kHz voice sample.
 - Added opt-in `scripts/r0_live_soak.py` to run 24 hours of live-server WebSocket connections while recording server-process RSS/FD/threads to JSONL. The scripts are syntax checked by CI.
-- **Verified:** 25 unit tests and 12 integration tests PASS, required Ruff correctness PASS at checkpoint `d09fc5dd8fafa5cfe1c81faa0c9f83ab69e1a0a5` (Foundation run `38021882372`, Ruff run `38021882373`).
+- **Verified:** 26 unit tests and 12 integration tests PASS, required Ruff correctness PASS at checkpoint `4e9bd0352ad5155e06569205dbc52cf0e4add699` (Foundation run `38021986725`, Ruff run `38021986714`).
 - **NOT VERIFIED:** genuine production-provider E2E, full 24-hour soak, provider-specific parallel throughput benchmarking and deployment compatibility.
 - See [fourth microbatch evidence](../evaluation/R0.1-microbatch-04-providers-soak.md); R0.1 still IN PROGRESS.
 
