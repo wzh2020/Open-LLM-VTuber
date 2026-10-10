@@ -18,7 +18,7 @@ from starlette.staticfiles import StaticFiles as StarletteStaticFiles
 from .routes import init_client_ws_route, init_webtool_routes, init_proxy_route
 from .service_context import ServiceContext
 from .websocket_handler import WebSocketHandler
-from .provider_access import serialize_shared_engines
+from .provider_access import serialize_shared_engines, close_shared_engines
 from .config_manager.utils import Config
 
 
@@ -172,7 +172,10 @@ class WebSocketServer:
             try:
                 await self.ws_handler.shutdown()
             finally:
-                await self.default_context_cache.close()
+                try:
+                    await self.default_context_cache.close()
+                finally:
+                    await close_shared_engines(self.default_context_cache)
 
     async def initialize(self):
         """Initialize shared resources; normally called by the FastAPI lifespan."""
